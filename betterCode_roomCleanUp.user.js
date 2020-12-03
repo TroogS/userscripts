@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         betterCode() Conference Room CleanUp
 // @namespace    http://tampermonkey.net/
-// @version      0.0.1
+// @version      0.1
 // @updateURL    https://github.com/TroogS/userscripts/blob/master/betterCode_roomCleanUp.user.js
 // @downloadURL  https://github.com/TroogS/userscripts/blob/master/betterCode_roomCleanUp.user.js
 // @description  Clean up betterCode() Conference Rooms
