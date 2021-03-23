@@ -3,8 +3,8 @@
 // @description  Kopieren der Testdaten aus dem No-Q System in den PdfAutofiller. Erstellt für den OV Dreis-Tiefenbach
 // @namespace    http://tampermonkey.net/
 // @version      0.1
-// @updateURL    https://github.com/TroogS/userscripts/blob/master/no-q-testcenter-to-pdfautofill.user.js
-// @downloadURL  https://github.com/TroogS/userscripts/blob/master/no-q-testcenter-to-pdfautofill.user.js
+// @updateURL    https://github.com/TroogS/userscripts/raw/master/no-q-testcenter-to-pdfautofill.user.js
+// @downloadURL  https://github.com/TroogS/userscripts/raw/master/no-q-testcenter-to-pdfautofill.user.js
 // @author       Andre Beging
 // @match        https://app.no-q.info/de/locations/*/checkins/reservations*
 // @icon         https://www.google.com/s2/favicons?domain=no-q.info
