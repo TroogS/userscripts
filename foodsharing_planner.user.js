@@ -2,8 +2,8 @@
 // @name         Foodsharing Planner
 // @namespace    http://tampermonkey.net/
 // @version      0.1
-// @updateURL    https://github.com/TroogS/userscripts/blob/master/foodsharing_planner.user.js
-// @downloadURL  https://github.com/TroogS/userscripts/blob/master/foodsharing_planner.user.js
+// @updateURL    https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
+// @downloadURL  https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
 // @description  Use stackoverflow full width, optional night mode
 // @author       A. Beging
 // @match        https://foodsharing.de*
