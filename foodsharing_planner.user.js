@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Foodsharing Planner
 // @namespace    http://tampermonkey.net/
-// @version      0.2
+// @version      0.3
 // @updateURL    https://github.com/TroogS/userscripts/blob/master/foodsharing_planner.user.js
 // @downloadURL  https://github.com/TroogS/userscripts/blob/master/foodsharing_planner.user.js
 // @description  Generate a calendar like view as addition to the foodsharing website germany, austria and switzerland
@@ -32,7 +32,7 @@ var gFirstDayDate;
   'use strict';
 
   CreateButton();
-
+  gFirstDayDate = GetFirstDay();
   var mainPanel = CreateElement("div", "fspl d-none");
   document.querySelectorAll("body")[0].append(mainPanel);
 })();
@@ -130,16 +130,18 @@ a.navbar-brand.brand span:nth-child(2) span{
 ` );
 
 async function BuildPlannerAsync() {
-    gFirstDayDate = GetFirstDay();
     var mainPanel = document.querySelectorAll(".fspl")[0];
+    mainPanel.innerHTML = "";
 
-    var mon = CreateColumn(0, "Montag", '<a href="#"><i class="fas fa-arrow-left"/></a> ', null);
+    var mon = CreateColumn(0, "Montag");
     var tue = CreateColumn(1, "Dienstag");
     var wed = CreateColumn(2, "Mittwoch");
     var thu = CreateColumn(3, "Donnerstag");
     var fri = CreateColumn(4, "Freitag");
     var sat = CreateColumn(5, "Samstag");
-    var sun = CreateColumn(6, "Sonntag", null, ' <a href="#"><i class="fas fa-arrow-right"/></a>');
+    var sun = CreateColumn(6, "Sonntag");
+
+    CreateNavigationButtons(mainPanel);
 
     mainPanel.append(mon);
     mainPanel.append(tue);
@@ -184,6 +186,16 @@ async function BuildPlannerAsync() {
             }
         }
     });
+}
+
+function CreateNavigationButtons(mainPanel) {
+    var nextButton = CreateElement("button", "nextbutton");
+    nextButton.innerHTML = '<i class="fas fa-arrow-right" />';
+    nextButton.addEventListener('click',function () {
+        gFirstDayDate.setDate(gFirstDayDate.getDate() + 7);
+        BuildPlannerAsync();
+    });
+    mainPanel.append(nextButton);
 }
 
 function GetFirstDay() {
@@ -291,16 +303,9 @@ async function asyncForEach(array, callback) {
   }
 }
 
-function CreateColumn(num, title, htmlPre, htmlSuf) {
+function CreateColumn(num, title) {
     var titleDiv = CreateElement("div", "day-title text-center", title);
     titleDiv.innerHTML = title;
-
-    if(htmlPre) {
-        titleDiv.innerHTML = htmlPre + titleDiv.innerHTML;
-    }
-    if(htmlSuf) {
-        titleDiv.innerHTML = titleDiv.innerHTML + htmlSuf;
-    }
 
     var displayDate = new Date(gFirstDayDate);
     displayDate.setDate(gFirstDayDate.getDate() + num);
@@ -314,7 +319,7 @@ function CreateColumn(num, title, htmlPre, htmlSuf) {
 }
 
 function GetDatetext(date) {
-  return WithLeadingZeros(date.getDate(), 2) + "." + WithLeadingZeros(date.getMonth(), 2) + "." + WithLeadingZeros(date.getYear() + 1900, 4)
+  return WithLeadingZeros(date.getDate(), 2) + "." + WithLeadingZeros(date.getMonth(), 2) + "." + WithLeadingZeros(date.getFullYear(), 4)
 }
 
 function WithLeadingZeros(number, length) {
@@ -334,7 +339,6 @@ function TogglePlanner() {
 
   if(mainPanel.classList.contains('d-none')) {
     mainPanel.classList.remove("d-none");
-    mainPanel.innerHTML = "";
     BuildPlannerAsync();
   } else {
     mainPanel.classList.add("d-none");
