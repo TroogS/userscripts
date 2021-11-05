@@ -2,8 +2,8 @@
 // @name         Foodsharing Planner
 // @namespace    http://tampermonkey.net/
 // @version      0.3
-// @updateURL    https://github.com/TroogS/userscripts/blob/master/foodsharing_planner.user.js
-// @downloadURL  https://github.com/TroogS/userscripts/blob/master/foodsharing_planner.user.js
+// @updateURL    https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
+// @downloadURL  https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
 // @description  Generate a calendar like view as addition to the foodsharing website germany, austria and switzerland
 // @author       A. Beging
 // @match        https://foodsharing.de*
