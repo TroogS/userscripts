@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Foodsharing Planner
 // @namespace    http://tampermonkey.net/
-// @version      0.3
-// @updateURL    https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
-// @downloadURL  https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
+// @version      0.4
+// @updateURL    https://github.com/TroogS/userscripts/blob/master/foodsharing_planner.user.js
+// @downloadURL  https://github.com/TroogS/userscripts/blob/master/foodsharing_planner.user.js
 // @description  Generate a calendar like view as addition to the foodsharing website germany, austria and switzerland
 // @author       A. Beging
 // @match        https://foodsharing.de*
@@ -23,17 +23,29 @@ function GM_addStyle (cssStr) {
     document.head.append(newNode);
 }
 
+var userId;
 var token;
 var gPickupData;
 var gLoaded = false;
 var gFirstDayDate;
 
-(function() {
+(async function() {
   'use strict';
+
+  // Load Token
+  token = ReadToken();
+  if(!token) return;
+
+  // Load user
+  var meResult = await LoadMe();
+  if(!meResult) return;
 
   CreateButton();
   gFirstDayDate = GetFirstDay();
-  var mainPanel = CreateElement("div", "fspl d-none");
+  var weekPanel = CreateElement("div", "week");
+  var mainPanel = CreateElement("div", "fspl d-none", weekPanel);
+  CreateNavigationButtons(mainPanel);
+
   document.querySelectorAll("body")[0].append(mainPanel);
 })();
 
@@ -58,7 +70,13 @@ a.navbar-brand.brand span:nth-child(2) span{
   height: calc(100vh - 100px);
   width: calc(100vw - 100px);
   left: 50px;
+  display: flex;
+  flex-direction: column;
   top: 50px;
+}
+
+.fspl .week {
+  height: 100%;
   display: grid;
   grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
   overflow-y: auto;
@@ -90,7 +108,7 @@ a.navbar-brand.brand span:nth-child(2) span{
 }
 
 .day .pickup.pickup-yellow {
-  border-left-color: #ffc107
+  border-left-color: #64ae2457;
 }
 
 .day .pickup.pickup-red {
@@ -98,28 +116,36 @@ a.navbar-brand.brand span:nth-child(2) span{
 }
 
 .day .pickup .img-container {
-  display: flex;
+  display: grid;
+  grid-template-columns: min-content min-content;
+  gap: 5px;
 }
 
-.day .pickup .img-container > div {
-  padding-right: 5px;
+.day .pickup .img-container div.not-confirmed {
+  opacity: .33;
+}
+
+.day .pickup .img-container div.not-confirmed img {
+  border-inline: 1px solid red;
+}
+
+.day .pickup .img-container > div,
+.day .pickup .img-container .empty-slot{
+  width: 35px;
+  height: 35px;
 }
 
 .day .pickup .img-container > div img {
-  width: 35px;
-  height: 35px;
   border-radius: 5px;
+  border: 1px solid transparent;
 }
 
 .day .pickup .img-container .empty-slot {
-  width: 34px;
   display: flex;
-  height: 34px;
   justify-content: center;
   align-items: center;
   border: 1px solid #533a20;
   text-decoration: none;
-  margin-right: 5px;
   border-radius: 5px;
 }
 
@@ -129,9 +155,15 @@ a.navbar-brand.brand span:nth-child(2) span{
 
 ` );
 
+async function LoadMe() {
+    var apiUserData = await ApiGetCallAsync("user/current");
+    userId = apiUserData.id;
+    return apiUserData;
+}
+
 async function BuildPlannerAsync() {
-    var mainPanel = document.querySelectorAll(".fspl")[0];
-    mainPanel.innerHTML = "";
+    var weekPanel = document.querySelectorAll(".fspl .week")[0];
+    weekPanel.innerHTML = "";
 
     var mon = CreateColumn(0, "Montag");
     var tue = CreateColumn(1, "Dienstag");
@@ -141,27 +173,25 @@ async function BuildPlannerAsync() {
     var sat = CreateColumn(5, "Samstag");
     var sun = CreateColumn(6, "Sonntag");
 
-    CreateNavigationButtons(mainPanel);
-
-    mainPanel.append(mon);
-    mainPanel.append(tue);
-    mainPanel.append(wed);
-    mainPanel.append(thu);
-    mainPanel.append(fri);
-    mainPanel.append(sat);
-    mainPanel.append(sun);
+    weekPanel.append(mon);
+    weekPanel.append(tue);
+    weekPanel.append(wed);
+    weekPanel.append(thu);
+    weekPanel.append(fri);
+    weekPanel.append(sat);
+    weekPanel.append(sun);
 
     if(!gLoaded) gPickupData = await LoadPickupsAsync();
 
     var lastDayDate = GetLastDay(gFirstDayDate);
 
-    gPickupData.sort(function(a, b){return a.pickup.date > b.pickup.date});
+    gPickupData.sort(function(a, b){return a.pickup.dateObj > b.pickup.dateObj});
     gPickupData.forEach(pickup => {
 
-        if(pickup.pickup.date > gFirstDayDate && pickup.pickup.date < lastDayDate) {
+        if(pickup.pickup.dateObj > gFirstDayDate && pickup.pickup.dateObj < lastDayDate) {
             var pickupDiv = CreatePickupDiv(pickup);
 
-            switch (pickup.pickup.date.getDay()) {
+            switch (pickup.pickup.dateObj.getDay()) {
                 case 1:
                     mon.append(pickupDiv);
                     break;
@@ -189,13 +219,25 @@ async function BuildPlannerAsync() {
 }
 
 function CreateNavigationButtons(mainPanel) {
-    var nextButton = CreateElement("button", "nextbutton");
+    var navigationPanel = CreateElement("div", "fspl-nav text-center");
+
+    var prevButton = CreateElement("button", "button m-1");
+    prevButton.innerHTML = '<i class="fas fa-arrow-left" />';
+    prevButton.addEventListener('click',function () {
+        gFirstDayDate.setDate(gFirstDayDate.getDate() - 7);
+        BuildPlannerAsync();
+    });
+    navigationPanel.append(prevButton);
+
+    var nextButton = CreateElement("button", "button m-1");
     nextButton.innerHTML = '<i class="fas fa-arrow-right" />';
     nextButton.addEventListener('click',function () {
         gFirstDayDate.setDate(gFirstDayDate.getDate() + 7);
         BuildPlannerAsync();
     });
-    mainPanel.append(nextButton);
+    navigationPanel.append(nextButton);
+
+    mainPanel.prepend(navigationPanel);
 }
 
 function GetFirstDay() {
@@ -217,6 +259,7 @@ function GetLastDay(firstDayDate) {
 }
 
 function CreatePickupDiv(data) {
+
   var elementClass = "pickup";
   if(data.pickup.occupiedSlots.length == data.pickup.totalSlots) elementClass += " pickup-green";
   if(data.pickup.occupiedSlots.length < data.pickup.totalSlots && data.pickup.occupiedSlots.length > 0) elementClass += " pickup-yellow";
@@ -227,8 +270,8 @@ function CreatePickupDiv(data) {
   var headerSpan = CreateElement("div", "font-weight-bold", data.store.name);
   element.append(headerSpan);
 
-  var hours = (data.pickup.date.getHours() < 10 ? '0' : '') + data.pickup.date.getHours();
-  var minutes = (data.pickup.date.getMinutes() < 10 ? '0' : '') + data.pickup.date.getMinutes();
+  var hours = (data.pickup.dateObj.getHours() < 10 ? '0' : '') + data.pickup.dateObj.getHours();
+  var minutes = (data.pickup.dateObj.getMinutes() < 10 ? '0' : '') + data.pickup.dateObj.getMinutes();
   var timeString = hours + ":" + minutes;
   var timeSpan = CreateElement("div", "", timeString);
   element.append(timeSpan);
@@ -243,7 +286,9 @@ function CreatePickupDiv(data) {
             var imgUrl = 'images/mini_q_' + slot.profile.avatar;
             if(slot.profile.avatar.startsWith('/api/')) imgUrl = slot.profile.avatar + '?w=35&h=35';
 
-            var imgDiv = CreateElement("div");
+            var imgClass = "";
+            if(!slot.isConfirmed) imgClass = "not-confirmed";
+            var imgDiv = CreateElement("div", imgClass);
             imgDiv.innerHTML = '<a href="https://' + window.location.hostname + '/profile/' + slot.profile.id + '" target="_blank"><img title="' + slot.profile.name + '" src="' + imgUrl + '" /></a>';
             imgContainer.append(imgDiv);
         });
@@ -252,8 +297,10 @@ function CreatePickupDiv(data) {
     // Free slots
     for (let i = 0; i < data.pickup.freeSlots; i++) {
         var freeSlotA = CreateElement("a", "empty-slot");
-        freeSlotA.setAttribute("href", "https://" + window.location.hostname + "/?page=fsbetrieb&id=" + data.store.id);
-        freeSlotA.setAttribute("target", "_blank");
+        freeSlotA.setAttribute("href", "#");
+        freeSlotA.addEventListener('click', function () {
+            BookPickup(data);
+        });
 
         freeSlotA.innerHTML = '<i class="fas fa-question" />';
 
@@ -264,6 +311,25 @@ function CreatePickupDiv(data) {
 
 
   return element;
+}
+
+async function BookPickup(data) {
+
+    var dateText = GetDateText(data.pickup.dateObj);
+    var timeText = GetTimeText(data.pickup.dateObj);
+
+    var confResult = confirm("Bitte bestätigen!\nAbholung " + dateText + " - " + timeText + " bei " + data.store.name + " buchen?");
+
+    if(confResult) {
+        var endpoint = "stores/" + data.store.id + "/pickups/" + data.pickup.dateObj.toISOString() + "/" + userId;
+        var result = await ApiPostCallAsync(endpoint);
+
+        // Invalidate and reload
+        gLoaded = false;
+        BuildPlannerAsync();
+    }
+
+
 }
 
 async function LoadPickupsAsync() {
@@ -277,7 +343,7 @@ async function LoadPickupsAsync() {
 
             apiPickups.pickups.forEach(pickup => {
 
-                pickup.date = new Date(pickup.date);
+                pickup.dateObj = new Date(pickup.date);
                 pickup.freeSlots = pickup.totalSlots - pickup.occupiedSlots.length;
 
                 var obj = {
@@ -309,16 +375,19 @@ function CreateColumn(num, title) {
 
     var displayDate = new Date(gFirstDayDate);
     displayDate.setDate(gFirstDayDate.getDate() + num);
-    console.log(displayDate);
 
-    titleDiv.innerHTML = titleDiv.innerHTML + "<br />" + GetDatetext(displayDate);
+    titleDiv.innerHTML = titleDiv.innerHTML + "<br />" + GetDateText(displayDate);
 
     var day = CreateElement("div", "day day-" + num, titleDiv);
 
     return day;
 }
 
-function GetDatetext(date) {
+function GetTimeText(date) {
+  return WithLeadingZeros(date.getHours(), 2) + ":" + WithLeadingZeros(date.getMinutes(), 2);
+}
+
+function GetDateText(date) {
   return WithLeadingZeros(date.getDate(), 2) + "." + WithLeadingZeros(date.getMonth(), 2) + "." + WithLeadingZeros(date.getFullYear(), 4)
 }
 
@@ -368,14 +437,63 @@ function CreateElement(tagName, classList, content) {
   return element;
 }
 
-// Api call function
+// Api get call function
 async function ApiGetCallAsync(endpoint) {
-  const res = await window.$.ajax({
-    url: 'https://' + window.location.hostname + '/api/' + endpoint,
-    type: 'GET',
-  });
 
-  return res;
+    try {
+        const res = await window.$.ajax({
+            url: 'https://' + window.location.hostname + '/api/' + endpoint,
+            type: 'GET',
+            headers: {
+                "accept": "*/*",
+                "X-CSRF-Token": token,
+            },
+        });
+
+        return res;
+    }
+    catch (e) {
+        return false;
+    }
+}
+
+// Api patch call function
+async function ApiPatchCallAsync(endpoint, data) {
+    const res = await window.$.ajax({
+        url: 'https://' + window.location.hostname + '/api/' + endpoint,
+        type: 'PATCH',
+        contentType: "application/json; charset=utf-8",
+        headers: {
+            "accept": "*/*",
+            "X-CSRF-Token": token,
+        },
+        data : JSON.stringify(data),
+        //data: {name:'yogesh',salary: 35000,email: 'yogesh@makitweb.com'},
+        success: function(response){
+
+        }
+    });
+
+    return res;
+}
+
+// Api post call function
+async function ApiPostCallAsync(endpoint, data) {
+    const res = await window.$.ajax({
+        url: 'https://' + window.location.hostname + '/api/' + endpoint,
+        type: 'POST',
+        contentType: "application/json; charset=utf-8",
+        headers: {
+            "accept": "*/*",
+            "X-CSRF-Token": token,
+        },
+        data : JSON.stringify(data),
+        success: function(response){
+
+        }
+    });
+
+    return res;
 }
 
 // Read token from cookie
