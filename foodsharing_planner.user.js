@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Foodsharing Planner
 // @namespace    http://tampermonkey.net/
-// @version      0.5
-// @updateURL    https://github.com/TroogS/userscripts/blob/master/foodsharing_planner.user.js
-// @downloadURL  https://github.com/TroogS/userscripts/blob/master/foodsharing_planner.user.js
+// @version      0.6
+// @updateURL    https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
+// @downloadURL  https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
 // @description  Generate a calendar like view as addition to the foodsharing website germany, austria and switzerland
 // @author       A. Beging
 // @match        https://foodsharing.de*
@@ -42,12 +42,36 @@ var gFirstDayDate;
 
   CreateButton();
   gFirstDayDate = GetFirstDay();
+
   var weekPanel = CreateElement("div", "week");
   var mainPanel = CreateElement("div", "fspl d-none", weekPanel);
+  mainPanel.append(CreatingLoadingOverlay());
   CreateNavigationButtons(mainPanel);
 
   document.querySelectorAll("body")[0].append(mainPanel);
 })();
+
+function CreatingLoadingOverlay() {
+    var loadingOverlay = CreateElement("div", "loading-overlay hidden");
+
+    var spinnerDiv = CreateElement("div");
+    spinnerDiv.innerHTML = '<i class="fas fa-pizza-slice" />';
+    spinnerDiv.innerHTML += "&nbsp;Lade...";
+
+    loadingOverlay.append(spinnerDiv);
+
+    return loadingOverlay;
+}
+
+function ShowLoadingOverlay() {
+  var loadingOverlay = document.querySelectorAll(".fspl .loading-overlay")[0];
+  loadingOverlay.classList.remove('hidden');
+}
+
+function HideLoadingOverlay() {
+  var loadingOverlay = document.querySelectorAll(".fspl .loading-overlay")[0];
+  loadingOverlay.classList.add('hidden');
+}
 
 GM_addStyle ( `
 
@@ -82,11 +106,37 @@ a.navbar-brand.brand span:nth-child(2) span{
   overflow-y: auto;
 }
 
+.fspl .loading-overlay {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.fspl .loading-overlay.hidden {
+  display: none;
+}
+
+.fspl .loading-overlay > div {
+  font-size: 2rem;
+}
+
+.fspl .loading-overlay i {
+  animation: rotation 2s linear infinite;
+}
+
 .day {
   flex: 1;
   border: 1px solid #533a20;
   height: max-content;
-  min-height: 100%;
+  height: 100%;
+}
+
+.day.today {
+  background-color: #ffeeba;
 }
 
 .day .day-title {
@@ -101,6 +151,14 @@ a.navbar-brand.brand span:nth-child(2) span{
   margin: 5px;
   border-radius: 5px;
   padding: 5px;
+}
+
+.day .pickup.me {
+  background-color: #d8ffbe;
+}
+
+.day .pickup > a {
+  color: #000;
 }
 
 .day .pickup.pickup-green {
@@ -153,6 +211,15 @@ a.navbar-brand.brand span:nth-child(2) span{
   color: #533a20;
 }
 
+@keyframes rotation {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(359deg);
+  }
+}
+
 ` );
 
 async function LoadMe() {
@@ -162,6 +229,8 @@ async function LoadMe() {
 }
 
 async function BuildPlannerAsync() {
+    ShowLoadingOverlay();
+
     var weekPanel = document.querySelectorAll(".fspl .week")[0];
     weekPanel.innerHTML = "";
 
@@ -216,12 +285,15 @@ async function BuildPlannerAsync() {
             }
         }
     });
+
+    HideLoadingOverlay();
 }
 
 function CreateNavigationButtons(mainPanel) {
     var navigationPanel = CreateElement("div", "fspl-nav text-center");
 
     var prevButton = CreateElement("button", "button m-1");
+    prevButton.setAttribute("title", "Vorherige Woche");
     prevButton.innerHTML = '<i class="fas fa-arrow-left" />';
     prevButton.addEventListener('click',function () {
         gFirstDayDate.setDate(gFirstDayDate.getDate() - 7);
@@ -229,7 +301,26 @@ function CreateNavigationButtons(mainPanel) {
     });
     navigationPanel.append(prevButton);
 
+    var todayButton = CreateElement("button", "button m-1");
+    todayButton.setAttribute("title", "Heute");
+    todayButton.innerHTML = '<i class="fas fa-calendar-day" />';
+    todayButton.addEventListener('click',function () {
+        gFirstDayDate = GetFirstDay();
+        BuildPlannerAsync();
+    });
+    navigationPanel.append(todayButton);
+
+    var reloadButton = CreateElement("button", "button m-1");
+    reloadButton.setAttribute("title", "Neu laden");
+    reloadButton.innerHTML = '<i class="fas fa-sync" />';
+    reloadButton.addEventListener('click',function () {
+        gLoaded = false;
+        BuildPlannerAsync();
+    });
+    navigationPanel.append(reloadButton);
+
     var nextButton = CreateElement("button", "button m-1");
+    nextButton.setAttribute("title", "Nächste Woche");
     nextButton.innerHTML = '<i class="fas fa-arrow-right" />';
     nextButton.addEventListener('click',function () {
         gFirstDayDate.setDate(gFirstDayDate.getDate() + 7);
@@ -267,7 +358,9 @@ function CreatePickupDiv(data) {
 
   var element = CreateElement("div", elementClass);
 
-  var headerSpan = CreateElement("div", "font-weight-bold", data.store.name);
+  var headerSpan = CreateElement("a", "font-weight-bold", data.store.name);
+  headerSpan.setAttribute("href", "https://foodsharing.de/?page=fsbetrieb&id=" + data.store.id);
+  headerSpan.setAttribute("target", "_blank");
   element.append(headerSpan);
 
   var hours = (data.pickup.dateObj.getHours() < 10 ? '0' : '') + data.pickup.dateObj.getHours();
@@ -285,6 +378,10 @@ function CreatePickupDiv(data) {
         data.pickup.occupiedSlots.forEach(slot => {
             var imgUrl = 'https://' + window.location.hostname + '/images/mini_q_' + slot.profile.avatar;
             if(slot.profile.avatar.startsWith('/api/')) imgUrl = slot.profile.avatar + '?w=35&h=35';
+
+            if(slot.profile.id == userId) {
+              element.classList.add("me");
+            }
 
             var imgClass = "";
             if(!slot.isConfirmed) imgClass = "not-confirmed";
@@ -378,7 +475,10 @@ function CreateColumn(num, title) {
 
     titleDiv.innerHTML = titleDiv.innerHTML + "<br />" + GetDateText(displayDate);
 
-    var day = CreateElement("div", "day day-" + num, titleDiv);
+    var classes = "day day-" + num;
+    if(IsToday(displayDate)) classes += " today";
+
+    var day = CreateElement("div", classes, titleDiv);
 
     return day;
 }
@@ -388,8 +488,15 @@ function GetTimeText(date) {
 }
 
 function GetDateText(date) {
-  return WithLeadingZeros(date.getDate(), 2) + "." + WithLeadingZeros(date.getMonth(), 2) + "." + WithLeadingZeros(date.getFullYear(), 4)
+  return WithLeadingZeros(date.getDate(), 2) + "." + WithLeadingZeros(date.getMonth() + 1, 2) + "." + WithLeadingZeros(date.getFullYear(), 4)
 }
+
+const IsToday = (date) => {
+    const today = new Date()
+    return date.getDate() === today.getDate() &&
+        date.getMonth() === today.getMonth() &&
+        date.getFullYear() === today.getFullYear();
+};
 
 function WithLeadingZeros(number, length) {
 
