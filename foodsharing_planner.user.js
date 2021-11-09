@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Foodsharing Planner
 // @namespace    http://tampermonkey.net/
-// @version      0.6
+// @version      0.7
 // @updateURL    https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
 // @downloadURL  https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
 // @description  Generate a calendar like view as addition to the foodsharing website germany, austria and switzerland
@@ -17,73 +17,225 @@
 // @grant        none
 // ==/UserScript==
 
-function GM_addStyle (cssStr) {
-    var newNode = document.createElement ('style');
-    newNode.textContent = cssStr;
-    document.head.append(newNode);
+class Api {
+
+    static PickupData;
+    static Token;
+    static User;
+
+    static async BookPickup(data) {
+
+        var dateText = Convenience.GetDateText(data.pickup.dateObj);
+        var timeText = Convenience.GetTimeText(data.pickup.dateObj);
+
+        var confResult = confirm("Bitte bestätigen!\nAbholung " + dateText + " - " + timeText + " bei " + data.store.name + " buchen?");
+
+        if(confResult) {
+            var endpoint = "stores/" + data.store.id + "/pickups/" + data.pickup.dateObj.toISOString() + "/" + this.User.id;
+            var result = await this.PostAsync(endpoint);
+
+            // Invalidate and reload
+            DataStore.Loaded = false;
+            BuildPlannerAsync();
+        }
+    }
+
+    // Api get call function
+    static async GetAsync(endpoint) {
+
+        try {
+            const res = await window.$.ajax({
+                url: 'https://' + window.location.hostname + '/api/' + endpoint,
+                type: 'GET',
+                headers: {
+                    "accept": "*/*",
+                    "X-CSRF-Token": this.Token,
+                },
+            });
+
+            return res;
+        }
+        catch (e) {
+            return false;
+        }
+    }
+
+    // Api patch call function
+    static async PatchAsync(endpoint, data) {
+        const res = await window.$.ajax({
+            url: 'https://' + window.location.hostname + '/api/' + endpoint,
+            type: 'PATCH',
+            contentType: "application/json; charset=utf-8",
+            headers: {
+                "accept": "*/*",
+                "X-CSRF-Token": this.Token,
+            },
+            data : JSON.stringify(data),
+            //data: {name:'yogesh',salary: 35000,email: 'yogesh@makitweb.com'},
+            success: function(response){
+
+            }
+        });
+
+        return res;
+    }
+
+    // Api post call function
+    static async PostAsync(endpoint, data) {
+        try {
+            const res = await window.$.ajax({
+                url: 'https://' + window.location.hostname + '/api/' + endpoint,
+                type: 'POST',
+                contentType: "application/json; charset=utf-8",
+                headers: {
+                    "accept": "*/*",
+                    "X-CSRF-Token": this.Token,
+                },
+                data : JSON.stringify(data)
+            });
+
+            return res;
+        }
+        catch (e) {
+          return false;
+        }
+    }
+
+    static async LoadMe() {
+        this.User = await this.GetAsync("user/current");
+    }
+
+    // Load and prepare pickup data from api
+    static async LoadPickupsAsync() {
+
+        let pickupData = new Array();
+        var apiStoreData = await this.GetAsync("user/current/stores");
+
+        await Convenience.AsyncForEach(apiStoreData, async (store) => {
+            var apiPickups = await this.GetAsync('stores/' + store.id + '/pickups');
+            if(apiPickups.pickups.length > 0) {
+
+                apiPickups.pickups.forEach(pickup => {
+
+                    pickup.dateObj = new Date(pickup.date);
+                    pickup.freeSlots = pickup.totalSlots - pickup.occupiedSlots.length;
+
+                    var obj = {
+                        store: {
+                            id: store.id,
+                            name: store.name
+                        },
+                        pickup: pickup
+                    };
+
+                    pickupData.push(obj);
+                });
+            }
+        });
+
+        DataStore.Loaded = true;
+
+        return pickupData;
+    }
+
+    // Read token from cookie
+    static ReadToken() {
+        var nameEQ = "CSRF_TOKEN=";
+        var ca = document.cookie.split(';');
+        for (var i = 0; i < ca.length; i++) {
+            var c = ca[i];
+            while (c.charAt(0) == ' ') c = c.substring(1, c.length);
+            if (c.indexOf(nameEQ) == 0) {
+                this.Token = c.substring(nameEQ.length, c.length);
+                return this.Token;
+            }
+        }
+
+        this.Token = null;
+        return null;
+    }
+
 }
 
-var userId;
-var token;
-var gPickupData;
-var gLoaded = false;
-var gFirstDayDate;
+class Convenience {
 
-(async function() {
-  'use strict';
+    static async AsyncForEach(array, callback) {
+        for (let index = 0; index < array.length; index++) {
+            await callback(array[index], index, array);
+        }
+    }
 
-  // Load Token
-  token = ReadToken();
-  if(!token) return;
+    // Get the first day of the current week (monday)
+    static GetFirstDay() {
+        var curr = new Date();
+        var first = curr.getDate() - curr.getDay() + 1;
+        var firstDay = new Date(curr.setDate(first));
+        firstDay.setHours(0,0,0,0);
 
-  // Load user
-  var meResult = await LoadMe();
-  if(!meResult) return;
+        return firstDay;
+    }
 
-  CreateButton();
-  gFirstDayDate = GetFirstDay();
+    // Get the last day of the given dates week (sunday)
+    static GetLastDay(firstDayDate) {
+        var curr = new Date(firstDayDate);
+        var last = curr.getDate() - curr.getDay() + 7;
+        var lastDay = new Date(curr.setDate(last));
+        lastDay.setHours(23,59,59,999);
 
-  var weekPanel = CreateElement("div", "week");
-  var mainPanel = CreateElement("div", "fspl d-none", weekPanel);
-  mainPanel.append(CreatingLoadingOverlay());
-  CreateNavigationButtons(mainPanel);
+        return lastDay;
+    }
 
-  document.querySelectorAll("body")[0].append(mainPanel);
-})();
+    static GetDateText(date) {
+        return Convenience.WithLeadingZeros(date.getDate(), 2) + "."
+            + Convenience.WithLeadingZeros(date.getMonth() + 1, 2) + "."
+            + Convenience.WithLeadingZeros(date.getFullYear(), 4)
+    }
 
-function CreatingLoadingOverlay() {
-    var loadingOverlay = CreateElement("div", "loading-overlay hidden");
+    static GetTimeText(date) {
+        return Convenience.WithLeadingZeros(date.getHours(), 2) + ":"
+            + Convenience.WithLeadingZeros(date.getMinutes(), 2);
+    }
 
-    var spinnerDiv = CreateElement("div");
-    spinnerDiv.innerHTML = '<i class="fas fa-pizza-slice" />';
-    spinnerDiv.innerHTML += "&nbsp;Lade...";
+    static IsToday(date) {
+        const today = new Date()
+        return date.getDate() === today.getDate() &&
+            date.getMonth() === today.getMonth() &&
+            date.getFullYear() === today.getFullYear();
+    };
 
-    loadingOverlay.append(spinnerDiv);
+    static ShowLoadingOverlay() {
+        var loadingOverlay = document.querySelectorAll(".fspl .loading-overlay")[0];
+        if(loadingOverlay) loadingOverlay.classList.remove('hidden');
+    }
 
-    return loadingOverlay;
+    static HideLoadingOverlay() {
+        var loadingOverlay = document.querySelectorAll(".fspl .loading-overlay")[0];
+        if(loadingOverlay) loadingOverlay.classList.add('hidden');
+    }
+
+    static WithLeadingZeros(number, length) {
+        var stringNumber = number.toString();
+        while(stringNumber.length < length) {
+            stringNumber = "0" + stringNumber;
+        }
+        return stringNumber;
+    }
+
 }
 
-function ShowLoadingOverlay() {
-  var loadingOverlay = document.querySelectorAll(".fspl .loading-overlay")[0];
-  loadingOverlay.classList.remove('hidden');
-}
+class StyleHelper {
 
-function HideLoadingOverlay() {
-  var loadingOverlay = document.querySelectorAll(".fspl .loading-overlay")[0];
-  loadingOverlay.classList.add('hidden');
-}
+    static ApplyStyle() {
+        this.CreateStyleTag(this.Style);
+    }
 
-GM_addStyle ( `
+    static CreateStyleTag(cssContent) {
+        var newNode = document.createElement ('style');
+        newNode.textContent = cssContent;
+        document.head.append(newNode);
+    }
 
-a.navbar-brand.brand span:first-child,
-span.regionName {
-  display: none !important;
-}
-
-a.navbar-brand.brand span:nth-child(2),
-a.navbar-brand.brand span:nth-child(2) span{
-  display: inline-block !important;
-}
+    static Style = `
 
 .fspl {
   position: fixed;
@@ -110,7 +262,7 @@ a.navbar-brand.brand span:nth-child(2) span{
   position: absolute;
   width: 100%;
   height: 100%;
-  background-color: rgba(255, 255, 255, 0.5);
+  background-color: rgba(255, 255, 255, 0.7);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -220,16 +372,96 @@ a.navbar-brand.brand span:nth-child(2) span{
   }
 }
 
-` );
+    `;
 
-async function LoadMe() {
-    var apiUserData = await ApiGetCallAsync("user/current");
-    userId = apiUserData.id;
-    return apiUserData;
 }
 
+class DataStore {
+    static Loaded = false;
+    static FirstDay;
+}
+
+class DOMHelper {
+    // Create generic element
+    static CreateElement(tagName, classList, content) {
+        var element = document.createElement(tagName);
+
+        if(classList) element.classList = classList;
+        if(content) element.append(content);
+
+        return element;
+    }
+
+    // Create calendar button for navigation bar
+    static CreatePlannerButton() {
+        var i = this.CreateElement("i", "fas fa-calendar-alt");
+        var a = this.CreateElement("a", "nav-link", i);
+        a.href = "#";
+        a.addEventListener('click',function () {TogglePlanner();});
+
+        var li = this.CreateElement("li", "nav-item", a);
+        var div = this.CreateElement("div", null, li);
+
+        document.querySelectorAll(".navbar-nav.nav-row")[0].append(div);
+    }
+
+    static CreateNavigationButton(parentElement, title, iconClass, callback) {
+
+        var buttonElement = this.CreateElement("button", "button m-1");
+        buttonElement.setAttribute("title", title);
+        buttonElement.innerHTML = '<i class="' + iconClass + '" />';
+        buttonElement.addEventListener('click',function () {
+            callback();
+        });
+
+        parentElement.append(buttonElement);
+    }
+
+    static CreateLoadingOverlay(parentElement) {
+        var loadingOverlay = this.CreateElement("div", "loading-overlay hidden");
+
+        var spinnerDiv = this.CreateElement("div");
+        spinnerDiv.innerHTML = '<i class="fas fa-pizza-slice" />';
+        spinnerDiv.innerHTML += "&nbsp;Lade...";
+
+        loadingOverlay.append(spinnerDiv);
+
+        parentElement.append(loadingOverlay);
+    }
+
+    static SetupMainPanel() {
+        var weekPanel = this.CreateElement("div", "week");
+        var mainPanel = this.CreateElement("div", "fspl d-none", weekPanel);
+
+        this.CreateLoadingOverlay(mainPanel);
+        CreateNavigationButtons(mainPanel);
+
+        document.querySelectorAll("body")[0].append(mainPanel);
+    }
+}
+
+// Startup Function
+(async function() {
+  'use strict';
+
+  // Load Token
+  Api.ReadToken();
+  if(!Api.Token) return;
+
+  // Load user
+  await Api.LoadMe();
+  if(!Api.User) return;
+
+  DOMHelper.CreatePlannerButton();
+  StyleHelper.ApplyStyle();
+  DataStore.FirstDay = Convenience.GetFirstDay();
+
+  DOMHelper.SetupMainPanel();
+
+})();
+
 async function BuildPlannerAsync() {
-    ShowLoadingOverlay();
+    Convenience.ShowLoadingOverlay();
 
     var weekPanel = document.querySelectorAll(".fspl .week")[0];
     weekPanel.innerHTML = "";
@@ -250,14 +482,14 @@ async function BuildPlannerAsync() {
     weekPanel.append(sat);
     weekPanel.append(sun);
 
-    if(!gLoaded) gPickupData = await LoadPickupsAsync();
+    if(!DataStore.Loaded) Api.PickupData = await Api.LoadPickupsAsync();
 
-    var lastDayDate = GetLastDay(gFirstDayDate);
+    var lastDayDate = Convenience.GetLastDay(DataStore.FirstDay);
 
-    gPickupData.sort(function(a, b){return a.pickup.dateObj > b.pickup.dateObj});
-    gPickupData.forEach(pickup => {
+    Api.PickupData.sort(function(a, b){return a.pickup.dateObj > b.pickup.dateObj});
+    Api.PickupData.forEach(pickup => {
 
-        if(pickup.pickup.dateObj > gFirstDayDate && pickup.pickup.dateObj < lastDayDate) {
+        if(pickup.pickup.dateObj > DataStore.FirstDay && pickup.pickup.dateObj < lastDayDate) {
             var pickupDiv = CreatePickupDiv(pickup);
 
             switch (pickup.pickup.dateObj.getDay()) {
@@ -286,67 +518,33 @@ async function BuildPlannerAsync() {
         }
     });
 
-    HideLoadingOverlay();
+    Convenience.HideLoadingOverlay();
 }
 
 function CreateNavigationButtons(mainPanel) {
-    var navigationPanel = CreateElement("div", "fspl-nav text-center");
+    var navigationPanel = DOMHelper.CreateElement("div", "fspl-nav text-center");
 
-    var prevButton = CreateElement("button", "button m-1");
-    prevButton.setAttribute("title", "Vorherige Woche");
-    prevButton.innerHTML = '<i class="fas fa-arrow-left" />';
-    prevButton.addEventListener('click',function () {
-        gFirstDayDate.setDate(gFirstDayDate.getDate() - 7);
+    DOMHelper.CreateNavigationButton(navigationPanel, "Vorherige Woche", "fas fa-arrow-left", () => {
+        DataStore.FirstDay.setDate(DataStore.FirstDay.getDate() - 7);
         BuildPlannerAsync();
     });
-    navigationPanel.append(prevButton);
 
-    var todayButton = CreateElement("button", "button m-1");
-    todayButton.setAttribute("title", "Heute");
-    todayButton.innerHTML = '<i class="fas fa-calendar-day" />';
-    todayButton.addEventListener('click',function () {
-        gFirstDayDate = GetFirstDay();
+    DOMHelper.CreateNavigationButton(navigationPanel, "Heute", "fas fa-calendar-day", () => {
+        DataStore.FirstDay = Convenience.GetFirstDay();
         BuildPlannerAsync();
     });
-    navigationPanel.append(todayButton);
 
-    var reloadButton = CreateElement("button", "button m-1");
-    reloadButton.setAttribute("title", "Neu laden");
-    reloadButton.innerHTML = '<i class="fas fa-sync" />';
-    reloadButton.addEventListener('click',function () {
-        gLoaded = false;
+    DOMHelper.CreateNavigationButton(navigationPanel, "Neu laden", "fas fa-sync", () => {
+        DataStore.Loaded = false;
         BuildPlannerAsync();
     });
-    navigationPanel.append(reloadButton);
 
-    var nextButton = CreateElement("button", "button m-1");
-    nextButton.setAttribute("title", "Nächste Woche");
-    nextButton.innerHTML = '<i class="fas fa-arrow-right" />';
-    nextButton.addEventListener('click',function () {
-        gFirstDayDate.setDate(gFirstDayDate.getDate() + 7);
+    DOMHelper.CreateNavigationButton(navigationPanel, "Nächste Woche", "fas fa-arrow-right", () => {
+        DataStore.FirstDay.setDate(DataStore.FirstDay.getDate() + 7);
         BuildPlannerAsync();
     });
-    navigationPanel.append(nextButton);
 
     mainPanel.prepend(navigationPanel);
-}
-
-function GetFirstDay() {
-    var curr = new Date();
-    var first = curr.getDate() - curr.getDay() + 1;
-    var firstDay = new Date(curr.setDate(first));
-    firstDay.setHours(0,0,0,0);
-
-    return firstDay;
-}
-
-function GetLastDay(firstDayDate) {
-    var curr = new Date(firstDayDate);
-    var last = curr.getDate() - curr.getDay() + 7;
-    var lastDay = new Date(curr.setDate(last));
-    lastDay.setHours(23,59,59,999);
-
-    return lastDay;
 }
 
 function CreatePickupDiv(data) {
@@ -356,21 +554,18 @@ function CreatePickupDiv(data) {
   if(data.pickup.occupiedSlots.length < data.pickup.totalSlots && data.pickup.occupiedSlots.length > 0) elementClass += " pickup-yellow";
   if(data.pickup.occupiedSlots.length == 0) elementClass += " pickup-red";
 
-  var element = CreateElement("div", elementClass);
+  var element = DOMHelper.CreateElement("div", elementClass);
 
-  var headerSpan = CreateElement("a", "font-weight-bold", data.store.name);
+  var headerSpan = DOMHelper.CreateElement("a", "font-weight-bold", data.store.name);
   headerSpan.setAttribute("href", "https://foodsharing.de/?page=fsbetrieb&id=" + data.store.id);
   headerSpan.setAttribute("target", "_blank");
   element.append(headerSpan);
 
-  var hours = (data.pickup.dateObj.getHours() < 10 ? '0' : '') + data.pickup.dateObj.getHours();
-  var minutes = (data.pickup.dateObj.getMinutes() < 10 ? '0' : '') + data.pickup.dateObj.getMinutes();
-  var timeString = hours + ":" + minutes;
-  var timeSpan = CreateElement("div", "", timeString);
+  var timeString = Convenience.GetTimeText(data.pickup.dateObj);
+  var timeSpan = DOMHelper.CreateElement("div", "", timeString);
   element.append(timeSpan);
 
-
-  var imgContainer = CreateElement("div", "img-container");
+  var imgContainer = DOMHelper.CreateElement("div", "img-container");
 
     // Occupies slots
     if(data.pickup.occupiedSlots.length > 0) {
@@ -379,13 +574,13 @@ function CreatePickupDiv(data) {
             var imgUrl = 'https://' + window.location.hostname + '/images/mini_q_' + slot.profile.avatar;
             if(slot.profile.avatar.startsWith('/api/')) imgUrl = slot.profile.avatar + '?w=35&h=35';
 
-            if(slot.profile.id == userId) {
+            if(slot.profile.id == Api.User.id) {
               element.classList.add("me");
             }
 
             var imgClass = "";
             if(!slot.isConfirmed) imgClass = "not-confirmed";
-            var imgDiv = CreateElement("div", imgClass);
+            var imgDiv = DOMHelper.CreateElement("div", imgClass);
             imgDiv.innerHTML = '<a href="https://' + window.location.hostname + '/profile/' + slot.profile.id + '" target="_blank"><img title="' + slot.profile.name + '" src="' + imgUrl + '" /></a>';
             imgContainer.append(imgDiv);
         });
@@ -393,10 +588,10 @@ function CreatePickupDiv(data) {
 
     // Free slots
     for (let i = 0; i < data.pickup.freeSlots; i++) {
-        var freeSlotA = CreateElement("a", "empty-slot");
+        var freeSlotA = DOMHelper.CreateElement("a", "empty-slot");
         freeSlotA.setAttribute("href", "#");
         freeSlotA.addEventListener('click', function () {
-            BookPickup(data);
+            Api.BookPickup(data);
         });
 
         freeSlotA.innerHTML = '<i class="fas fa-question" />';
@@ -410,103 +605,21 @@ function CreatePickupDiv(data) {
   return element;
 }
 
-async function BookPickup(data) {
-
-    var dateText = GetDateText(data.pickup.dateObj);
-    var timeText = GetTimeText(data.pickup.dateObj);
-
-    var confResult = confirm("Bitte bestätigen!\nAbholung " + dateText + " - " + timeText + " bei " + data.store.name + " buchen?");
-
-    if(confResult) {
-        var endpoint = "stores/" + data.store.id + "/pickups/" + data.pickup.dateObj.toISOString() + "/" + userId;
-        var result = await ApiPostCallAsync(endpoint);
-
-        // Invalidate and reload
-        gLoaded = false;
-        BuildPlannerAsync();
-    }
-
-
-}
-
-async function LoadPickupsAsync() {
-
-    let pickupData = new Array();
-    var apiStoreData = await ApiGetCallAsync("user/current/stores");
-
-    await asyncForEach(apiStoreData, async (store) => {
-        var apiPickups = await ApiGetCallAsync('stores/' + store.id + '/pickups');
-        if(apiPickups.pickups.length > 0) {
-
-            apiPickups.pickups.forEach(pickup => {
-
-                pickup.dateObj = new Date(pickup.date);
-                pickup.freeSlots = pickup.totalSlots - pickup.occupiedSlots.length;
-
-                var obj = {
-                    store: {
-                        id: store.id,
-                        name: store.name
-                    },
-                    pickup: pickup
-                };
-
-                pickupData.push(obj);
-            });
-        }
-    });
-
-    gLoaded = true;
-    return pickupData;
-}
-
-async function asyncForEach(array, callback) {
-  for (let index = 0; index < array.length; index++) {
-    await callback(array[index], index, array);
-  }
-}
-
-function CreateColumn(num, title) {
-    var titleDiv = CreateElement("div", "day-title text-center", title);
+function CreateColumn(dayOffset, title) {
+    var titleDiv = DOMHelper.CreateElement("div", "day-title text-center", title);
     titleDiv.innerHTML = title;
 
-    var displayDate = new Date(gFirstDayDate);
-    displayDate.setDate(gFirstDayDate.getDate() + num);
+    var displayDate = new Date(DataStore.FirstDay);
+    displayDate.setDate(DataStore.FirstDay.getDate() + dayOffset);
 
-    titleDiv.innerHTML = titleDiv.innerHTML + "<br />" + GetDateText(displayDate);
+    titleDiv.innerHTML = titleDiv.innerHTML + "<br />" + Convenience.GetDateText(displayDate);
 
-    var classes = "day day-" + num;
-    if(IsToday(displayDate)) classes += " today";
+    var classes = "day day-" + dayOffset;
+    if(Convenience.IsToday(displayDate)) classes += " today";
 
-    var day = CreateElement("div", classes, titleDiv);
+    var day = DOMHelper.CreateElement("div", classes, titleDiv);
 
     return day;
-}
-
-function GetTimeText(date) {
-  return WithLeadingZeros(date.getHours(), 2) + ":" + WithLeadingZeros(date.getMinutes(), 2);
-}
-
-function GetDateText(date) {
-  return WithLeadingZeros(date.getDate(), 2) + "." + WithLeadingZeros(date.getMonth() + 1, 2) + "." + WithLeadingZeros(date.getFullYear(), 4)
-}
-
-const IsToday = (date) => {
-    const today = new Date()
-    return date.getDate() === today.getDate() &&
-        date.getMonth() === today.getMonth() &&
-        date.getFullYear() === today.getFullYear();
-};
-
-function WithLeadingZeros(number, length) {
-
-    var stringNumber = number.toString();
-
-    while(stringNumber.length < length) {
-        stringNumber = "0" + stringNumber;
-    }
-
-    return stringNumber;
 }
 
 // Toggle planner visibility. Load data on show
@@ -519,98 +632,4 @@ function TogglePlanner() {
   } else {
     mainPanel.classList.add("d-none");
   }
-}
-
-// Create calendar button for navigation bar
-function CreateButton() {
-    var i = CreateElement("i", "fas fa-calendar-alt");
-    var a = CreateElement("a", "nav-link", i);
-    a.href = "#";
-    a.addEventListener('click',function () {TogglePlanner();});
-
-    var li = CreateElement("li", "nav-item", a);
-    var div = CreateElement("div", null, li);
-
-    document.querySelectorAll(".navbar-nav.nav-row")[0].append(div);
-}
-
-// Create element helper function
-function CreateElement(tagName, classList, content) {
-  var element = document.createElement(tagName);
-
-  if(classList) element.classList = classList;
-  if(content) element.append(content);
-
-  return element;
-}
-
-// Api get call function
-async function ApiGetCallAsync(endpoint) {
-
-    try {
-        const res = await window.$.ajax({
-            url: 'https://' + window.location.hostname + '/api/' + endpoint,
-            type: 'GET',
-            headers: {
-                "accept": "*/*",
-                "X-CSRF-Token": token,
-            },
-        });
-
-        return res;
-    }
-    catch (e) {
-        return false;
-    }
-}
-
-// Api patch call function
-async function ApiPatchCallAsync(endpoint, data) {
-    const res = await window.$.ajax({
-        url: 'https://' + window.location.hostname + '/api/' + endpoint,
-        type: 'PATCH',
-        contentType: "application/json; charset=utf-8",
-        headers: {
-            "accept": "*/*",
-            "X-CSRF-Token": token,
-        },
-        data : JSON.stringify(data),
-        //data: {name:'yogesh',salary: 35000,email: 'yogesh@makitweb.com'},
-        success: function(response){
-
-        }
-    });
-
-    return res;
-}
-
-// Api post call function
-async function ApiPostCallAsync(endpoint, data) {
-    const res = await window.$.ajax({
-        url: 'https://' + window.location.hostname + '/api/' + endpoint,
-        type: 'POST',
-        contentType: "application/json; charset=utf-8",
-        headers: {
-            "accept": "*/*",
-            "X-CSRF-Token": token,
-        },
-        data : JSON.stringify(data),
-        success: function(response){
-
-        }
-    });
-
-    return res;
-}
-
-// Read token from cookie
-function ReadToken() {
-    var nameEQ = "CSRF_TOKEN=";
-    var ca = document.cookie.split(';');
-    for (var i = 0; i < ca.length; i++) {
-        var c = ca[i];
-        while (c.charAt(0) == ' ') c = c.substring(1, c.length);
-        if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length, c.length);
-    }
-    return null;
 }
