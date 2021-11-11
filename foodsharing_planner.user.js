@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Foodsharing Planner
 // @namespace    http://tampermonkey.net/
-// @version      0.7
+// @version      0.8
 // @updateURL    https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
 // @downloadURL  https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
 // @description  Generate a calendar like view as addition to the foodsharing website germany, austria and switzerland
@@ -236,11 +236,16 @@ class StyleHelper {
     }
 
     static Style = `
+:root {
+  --fs-red: #dc3545;
+  --fs-yellow: #ffc107;
+}
 
 .fspl {
   position: fixed;
-  background: #f1e7c9;
-  border: 5px solid #533a20;
+  color: var(--fs-brown);
+  background-color: var(--fs-beige);
+  border: 5px solid var(--fs-brown);
   border-radius: 10px;
   z-index: 5000;
   height: calc(100vh - 100px);
@@ -282,7 +287,7 @@ class StyleHelper {
 
 .day {
   flex: 1;
-  border: 1px solid #533a20;
+  border: 1px solid var(--fs-brown);
   height: max-content;
   height: 100%;
 }
@@ -298,8 +303,10 @@ class StyleHelper {
 }
 
 .day .pickup {
-  border: 1px solid #533a20;
+  border: 0px solid transparent;
   border-left-width: 5px;
+  outline: 1px solid var(--fs-brown);
+  background-color: var(--fs-white);
   margin: 5px;
   border-radius: 5px;
   padding: 5px;
@@ -310,19 +317,19 @@ class StyleHelper {
 }
 
 .day .pickup > a {
-  color: #000;
+  color: var(--fs-brown);
 }
 
 .day .pickup.pickup-green {
-  border-left-color: #64ae24;
+  border-left-color: var(--fs-green);;
 }
 
 .day .pickup.pickup-yellow {
-  border-left-color: #64ae2457;
+  border-left-color: #64ae2466;
 }
 
 .day .pickup.pickup-red {
-  border-left-color: #dc3545;
+  border-left-color: var(--fs-red);
 }
 
 .day .pickup .img-container {
@@ -361,6 +368,14 @@ class StyleHelper {
 
 .day .pickup .img-container .empty-slot:hover i {
   color: #533a20;
+}
+
+.button-red {
+  background-color: var(--fs-red);
+}
+
+.button-red:hover {
+  background-color: #ff6977;
 }
 
 @keyframes rotation {
@@ -415,6 +430,7 @@ class DOMHelper {
         });
 
         parentElement.append(buttonElement);
+        return buttonElement;
     }
 
     static CreateLoadingOverlay(parentElement) {
@@ -533,6 +549,11 @@ function CreateNavigationButtons(mainPanel) {
         DataStore.FirstDay = Convenience.GetFirstDay();
         BuildPlannerAsync();
     });
+
+    var closeButton = DOMHelper.CreateNavigationButton(navigationPanel, "Heute", "fas fa-times", () => {
+        TogglePlanner();
+    });
+    closeButton.classList.add("button-red");
 
     DOMHelper.CreateNavigationButton(navigationPanel, "Neu laden", "fas fa-sync", () => {
         DataStore.Loaded = false;
