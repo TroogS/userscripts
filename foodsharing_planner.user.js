@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Foodsharing Planner
 // @namespace    http://tampermonkey.net/
-// @version      0.8
+// @version      0.9
 // @updateURL    https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
 // @downloadURL  https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
 // @description  Generate a calendar like view as addition to the foodsharing website germany, austria and switzerland
@@ -527,7 +527,7 @@ async function BuildPlannerAsync() {
                 case 6:
                     sat.append(pickupDiv);
                     break;
-                case 7:
+                case 0:
                     sun.append(pickupDiv);
                     break;
             }
