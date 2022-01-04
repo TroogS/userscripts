@@ -12,5 +12,16 @@ Click one of the links below. Your Tampermonkey/Greasemonkey will automatically 
 
 # User Scripts
 
-- [Foodsharing Planner](https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js)
-- [Foodsharing CleanUp](https://github.com/TroogS/userscripts/raw/master/foodsharing_cleanup.user.js)
+## Foodsharing Planner
+
+Adds a button to the top menu to open a calendar like overview
+
+https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
+
+![](https://i.imgur.com/BMFMaHZ.png)
+
+![](https://i.imgur.com/LII2mOb.png)
+
+
+## Foodsharing CleanUp
+https://github.com/TroogS/userscripts/raw/master/foodsharing_cleanup.user.js
