@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Foodsharing Planner
 // @namespace    http://tampermonkey.net/
-// @version      0.9
+// @version      0.11
 // @updateURL    https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
 // @downloadURL  https://github.com/TroogS/userscripts/raw/master/foodsharing_planner.user.js
 // @description  Generate a calendar like view as addition to the foodsharing website germany, austria and switzerland
@@ -17,6 +17,96 @@
 // @grant        none
 // ==/UserScript==
 
+class CacheHelper {
+
+    static Write(key, value) {
+
+        var data = {"data" : value};
+        console.log("storing data", data);
+
+        var serializedData = JSON.stringify(data);
+
+        window.localStorage.setItem("fspl_" + key, serializedData);
+    }
+
+    static Read(key) {
+        var serializedData = window.localStorage.getItem("fspl_" + key);
+        if(!serializedData) return null;
+        var data = JSON.parse(serializedData);
+        return data.data;
+    }
+
+    static ReadDate(key) {
+        var serializedData = window.localStorage.getItem("fspl_" + key);
+        if(!serializedData) return null;
+
+        var data = JSON.parse(serializedData);
+        var date = new Date(data.data);
+
+        return date;
+    }
+
+    static PickupsValid() {
+
+        var lastLoadString = this.ReadDate("pickupLoaded");
+        if(!lastLoadString) return false;
+
+        var lastLoad = new Date(lastLoadString);
+
+        var diff = new Date() - lastLoad;
+        diff = diff / 1000;
+
+        if(diff > 600) return false;
+
+        var pickupData = this.Read("pickupData");
+        if(!pickupData) return false;
+
+        return true;
+    }
+
+    static InvalidatePickups() {
+        this.Write("pickupLoaded", null);
+    }
+
+    static async GetStoreDetails(storeId) {
+
+        var localStorageKey = "storeDetails-" + storeId;
+        var storeDetails = this.Read(localStorageKey);
+        if(storeDetails) return storeDetails;
+
+        var storeDetailsApi = await Api.GetStoreDetails(storeId);
+
+        var storeDetails = {
+            id: storeId,
+            name: storeDetailsApi.store.name,
+            group: storeDetailsApi.store.group
+        };
+
+        this.Write(localStorageKey, storeDetails);
+        return storeDetails;
+    }
+
+    static async LoadPickupsAsync() {
+
+        var valid = this.PickupsValid();
+
+        if(valid) {
+            var pickupData = this.Read("pickupData");
+            pickupData.forEach(pickup => {
+                pickup.pickup.dateObj = new Date(pickup.pickup.date);
+            });
+            return pickupData;
+        }
+
+        var pickupData = await Api.LoadPickupsAsync();
+        this.Write("pickupData", pickupData);
+        this.Write("pickupLoaded", new Date());
+
+        return pickupData;
+    }
+
+}
+
 class Api {
 
     static PickupData;
@@ -31,13 +121,18 @@ class Api {
         var confResult = confirm("Bitte bestätigen!\nAbholung " + dateText + " - " + timeText + " bei " + data.store.name + " buchen?");
 
         if(confResult) {
+            Convenience.ShowLoadingOverlay();
             var endpoint = "stores/" + data.store.id + "/pickups/" + data.pickup.dateObj.toISOString() + "/" + this.User.id;
             var result = await this.PostAsync(endpoint);
 
             // Invalidate and reload
-            DataStore.Loaded = false;
+            CacheHelper.InvalidatePickups();
             BuildPlannerAsync();
         }
+    }
+
+    static async GetStoreDetails(storeId) {
+        return await this.GetAsync("stores/" + storeId);
     }
 
     // Api get call function
@@ -71,7 +166,6 @@ class Api {
                 "X-CSRF-Token": this.Token,
             },
             data : JSON.stringify(data),
-            //data: {name:'yogesh',salary: 35000,email: 'yogesh@makitweb.com'},
             success: function(response){
 
             }
@@ -112,11 +206,11 @@ class Api {
         var apiStoreData = await this.GetAsync("user/current/stores");
 
         await Convenience.AsyncForEach(apiStoreData, async (store) => {
+
             var apiPickups = await this.GetAsync('stores/' + store.id + '/pickups');
             if(apiPickups.pickups.length > 0) {
 
                 apiPickups.pickups.forEach(pickup => {
-
                     pickup.dateObj = new Date(pickup.date);
                     pickup.freeSlots = pickup.totalSlots - pickup.occupiedSlots.length;
 
@@ -132,8 +226,6 @@ class Api {
                 });
             }
         });
-
-        DataStore.Loaded = true;
 
         return pickupData;
     }
@@ -273,8 +365,8 @@ class StyleHelper {
   align-items: center;
 }
 
-.fspl .loading-overlay.hidden {
-  display: none;
+.hidden {
+  display: none !important;
 }
 
 .fspl .loading-overlay > div {
@@ -316,6 +408,10 @@ class StyleHelper {
   background-color: #d8ffbe;
 }
 
+.day .pickup.highlight {
+  background-color: #9ef6ff;
+}
+
 .day .pickup > a {
   color: var(--fs-brown);
 }
@@ -334,7 +430,7 @@ class StyleHelper {
 
 .day .pickup .img-container {
   display: grid;
-  grid-template-columns: min-content min-content;
+  grid-template-columns: min-content min-content min-content;
   gap: 5px;
 }
 
@@ -392,7 +488,6 @@ class StyleHelper {
 }
 
 class DataStore {
-    static Loaded = false;
     static FirstDay;
 }
 
@@ -420,11 +515,31 @@ class DOMHelper {
         document.querySelectorAll(".navbar-nav.nav-row")[0].append(div);
     }
 
+    static CreateNavigationSeparator(parentElement) {
+
+        var separatorElement = this.CreateElement("div", "d-inline");
+        separatorElement.innerHTML = "&bullet;";
+        parentElement.append(separatorElement);
+    }
+
     static CreateNavigationButton(parentElement, title, iconClass, callback) {
 
         var buttonElement = this.CreateElement("button", "button m-1");
         buttonElement.setAttribute("title", title);
         buttonElement.innerHTML = '<i class="' + iconClass + '" />';
+        buttonElement.addEventListener('click',function () {
+            callback();
+        });
+
+        parentElement.append(buttonElement);
+        return buttonElement;
+    }
+
+    static CreateNavigationTextButton(parentElement, title, callback) {
+
+        var buttonElement = this.CreateElement("button", "button m-1");
+        buttonElement.setAttribute("title", title);
+        buttonElement.innerHTML = title;
         buttonElement.addEventListener('click',function () {
             callback();
         });
@@ -498,12 +613,16 @@ async function BuildPlannerAsync() {
     weekPanel.append(sat);
     weekPanel.append(sun);
 
-    if(!DataStore.Loaded) Api.PickupData = await Api.LoadPickupsAsync();
+    var pickupData = await CacheHelper.LoadPickupsAsync();
 
     var lastDayDate = Convenience.GetLastDay(DataStore.FirstDay);
 
-    Api.PickupData.sort(function(a, b){return a.pickup.dateObj > b.pickup.dateObj});
-    Api.PickupData.forEach(pickup => {
+    pickupData.sort(function(a, b){return a.pickup.dateObj > b.pickup.dateObj});
+
+    await Convenience.AsyncForEach(pickupData, async (pickup) => {
+
+        var storeDetails = await CacheHelper.GetStoreDetails(pickup.store.id);
+        pickup.store.details = storeDetails;
 
         if(pickup.pickup.dateObj > DataStore.FirstDay && pickup.pickup.dateObj < lastDayDate) {
             var pickupDiv = CreatePickupDiv(pickup);
@@ -534,11 +653,47 @@ async function BuildPlannerAsync() {
         }
     });
 
+    // Get distinct list of store groups
+    const groups = [];
+    const map = new Map();
+    for (const item of pickupData) {
+        if(!map.has(item.store.details.group.id)){
+            map.set(item.store.details.group.id, true);    // set any value to Map
+            groups.push({
+                id: item.store.details.group.id,
+                name: item.store.details.group.name
+            });
+        }
+    }
+
+    if(groups && groups.length > 1) {
+        var groupButtonDiv = document.querySelectorAll("#groupbuttons")[0];
+        groupButtonDiv.innerHTML = "";
+        groups.forEach(group => {
+
+            DOMHelper.CreateNavigationTextButton(groupButtonDiv, group.name, () => {
+
+                var targetPickups = document.querySelectorAll(".group-" + group.id);
+                targetPickups.forEach(targetPickup => {
+                    targetPickup.classList.toggle("hidden");
+                });
+
+            });
+
+        });
+
+        DOMHelper.CreateNavigationSeparator(groupButtonDiv);
+    }
+
     Convenience.HideLoadingOverlay();
 }
 
 function CreateNavigationButtons(mainPanel) {
     var navigationPanel = DOMHelper.CreateElement("div", "fspl-nav text-center");
+
+    var groupToggleDiv = DOMHelper.CreateElement("div", "d-inline");
+    groupToggleDiv.setAttribute("id", "groupbuttons");
+    navigationPanel.append(groupToggleDiv);
 
     DOMHelper.CreateNavigationButton(navigationPanel, "Vorherige Woche", "fas fa-arrow-left", () => {
         DataStore.FirstDay.setDate(DataStore.FirstDay.getDate() - 7);
@@ -550,32 +705,55 @@ function CreateNavigationButtons(mainPanel) {
         BuildPlannerAsync();
     });
 
-    var closeButton = DOMHelper.CreateNavigationButton(navigationPanel, "Heute", "fas fa-times", () => {
-        TogglePlanner();
-    });
-    closeButton.classList.add("button-red");
-
-    DOMHelper.CreateNavigationButton(navigationPanel, "Neu laden", "fas fa-sync", () => {
-        DataStore.Loaded = false;
-        BuildPlannerAsync();
-    });
-
     DOMHelper.CreateNavigationButton(navigationPanel, "Nächste Woche", "fas fa-arrow-right", () => {
         DataStore.FirstDay.setDate(DataStore.FirstDay.getDate() + 7);
         BuildPlannerAsync();
     });
+
+    DOMHelper.CreateNavigationSeparator(navigationPanel);
+
+    DOMHelper.CreateNavigationButton(navigationPanel, "Toggle Marker", "fas fa-highlighter", () => {
+
+        var highlightElements = document.querySelectorAll(".highlighter");
+        highlightElements.forEach(highlightElement => {
+            highlightElement.classList.toggle("hidden");
+        });
+    });
+
+    DOMHelper.CreateNavigationSeparator(navigationPanel);
+
+    DOMHelper.CreateNavigationButton(navigationPanel, "Neu laden", "fas fa-sync", () => {
+        CacheHelper.InvalidatePickups();
+        BuildPlannerAsync();
+    });
+
+    var closeButton = DOMHelper.CreateNavigationButton(navigationPanel, "Heute", "fas fa-times", () => {
+        TogglePlanner();
+    });
+    closeButton.classList.add("button-red");
 
     mainPanel.prepend(navigationPanel);
 }
 
 function CreatePickupDiv(data) {
 
-  var elementClass = "pickup";
+  var elementClass = "pickup store-" + data.store.id + " group-" + data.store.details.group.id;
   if(data.pickup.occupiedSlots.length == data.pickup.totalSlots) elementClass += " pickup-green";
   if(data.pickup.occupiedSlots.length < data.pickup.totalSlots && data.pickup.occupiedSlots.length > 0) elementClass += " pickup-yellow";
   if(data.pickup.occupiedSlots.length == 0) elementClass += " pickup-red";
 
   var element = DOMHelper.CreateElement("div", elementClass);
+
+  var highlightLink = DOMHelper.CreateElement("a", "highlighter hidden");
+  highlightLink.innerHTML = '<i class="fas fa-highlighter"></i> ';
+  highlightLink.setAttribute("href", "#");
+  highlightLink.addEventListener('click', function () {
+      var hlPickups = document.querySelectorAll(".pickup.store-" + data.store.id);
+      hlPickups.forEach(hlPickup => {
+          hlPickup.classList.toggle("highlight");
+      });
+  });
+  element.append(highlightLink);
 
   var headerSpan = DOMHelper.CreateElement("a", "font-weight-bold", data.store.name);
   headerSpan.setAttribute("href", "https://foodsharing.de/?page=fsbetrieb&id=" + data.store.id);
